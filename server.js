@@ -14,6 +14,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app  = express();
 app.use(express.json());
+app.use('/v1/analytics', require('./routes/analytics'));
 
 // ─── [KPOS WINV10 P3] — Config ───────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3000;
