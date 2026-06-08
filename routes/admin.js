@@ -419,7 +419,7 @@ router.post('/api/config', requireAuth, async (req, res) => {
   const sb = getSupabase(req);
   if (!sb) return res.status(503).json({ error: 'No DB.' });
   try {
-    const { error } = await sb.from('server_config').upsert({ key, value, updated_at: new Date().toISOString() });
+    const { error } = await sb.from('server_config').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
     if (error) throw error;
     return res.json({ success: true });
   } catch (e) {
@@ -846,8 +846,10 @@ async function api(method, path, body) {
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
-  if (!res.ok && res.status === 401) { logout(); throw new Error('Unauthorized'); }
-  return res.json();
+  if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || ('Server error ' + res.status));
+  return data;
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -951,7 +953,7 @@ function renderLicTable(data) {
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-sm" onclick="copyText('\${r.key}')">Copy</button>
         \${!r.revoked ? \`<button class="btn btn-sm btn-danger" onclick="openSuspend('\${r.key}')">Suspend</button>\` : \`<button class="btn btn-sm btn-success" onclick="restoreKey('\${r.key}')">Restore</button>\`}
-        <button class="btn btn-sm" onclick="openNotes('\${r.key}',\${JSON.stringify(r.notes||'').replace(/'/g,"&#39;")})">Notes</button>
+        <button class="btn btn-sm" data-key="\${escHtml(r.key)}" data-notes="\${escHtml(r.notes||'')}" onclick="openNotesBtn(this)">Notes</button>
       </div>\`;
     return \`<tr>
       <td><span class="key-mono">\${r.key}</span></td>
@@ -1015,6 +1017,13 @@ function openNotes(key, notes) {
   document.getElementById('note-key-hidden').value = key;
   document.getElementById('note-text').value = typeof notes === 'string' ? notes : '';
   openModal('modal-notes');
+}
+
+// [KPOS WINV10 P6B-FIX] Read key/notes from data attributes — avoids HTML escaping issues
+function openNotesBtn(btn) {
+  const key   = btn.getAttribute('data-key')   || '';
+  const notes = btn.getAttribute('data-notes') || '';
+  openNotes(key, notes);
 }
 
 async function saveNote() {
