@@ -1,6 +1,7 @@
 // KPOS WINV10 — Activation Server
 // Copyright © 2025 @RT3M1S. All Rights Reserved.
 // [KPOS WINV10 P3] — Phase 3: Online License Activation Server
+// [KPOS WINV10 P6B] — Phase 6B: Admin panel + patch notes routes mounted
 // ════════════════════════════════════════════════════════════════════
 
 'use strict';
@@ -14,7 +15,6 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app  = express();
 app.use(express.json());
-app.use('/v1/analytics', require('./routes/analytics'));
 
 // ─── [KPOS WINV10 P3] — Config ───────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3000;
@@ -25,6 +25,10 @@ const SUPABASE_KEY   = process.env.SUPABASE_KEY;   // service_role key
 const supabase = (SUPABASE_URL && SUPABASE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
+
+// ─── [KPOS WINV10 P6B] — Expose supabase to all routes via app.locals ────────
+// admin.js and patchnotes.js access it via req.app.locals.supabase
+app.locals.supabase = supabase;
 
 // ─── [KPOS WINV10 P3] — License Constants (must match main.js) ───────────────
 const TRIAL_DAYS  = 30;
@@ -107,6 +111,19 @@ function slog(level, event, detail = {}) {
   }));
 }
 
+// ─── [KPOS WINV10 P6B] — server_config helper ────────────────────────────────
+/** Read a boolean flag from server_config. Returns true if value is 'true' or DB unavailable. */
+async function configFlag(key) {
+  if (!supabase) return true; // default open in dev mode
+  try {
+    const { data } = await supabase.from('server_config').select('value').eq('key', key).single();
+    if (!data) return true; // missing row = default enabled
+    return data.value !== 'false';
+  } catch (e) {
+    return true; // DB error = default open (don't block customers)
+  }
+}
+
 // ─── [KPOS WINV10 P3] — Supabase Key Lookup ──────────────────────────────────
 // Expected table: license_keys
 // Columns: key TEXT PK, type TEXT, active BOOL, device_id TEXT, activated_at TIMESTAMPTZ,
@@ -151,6 +168,13 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'KPOS WINV10 License Server', version: '3.0.0' });
 });
 
+// ─── [KPOS WINV10 P3] — Analytics route ──────────────────────────────────────
+app.use('/v1/analytics', require('./routes/analytics'));
+
+// ─── [KPOS WINV10 P6B] — Admin + Patch Notes routes ─────────────────────────
+app.use('/admin',          require('./routes/admin'));
+app.use('/v1/patch-notes', require('./routes/patchnotes'));
+
 // ════════════════════════════════════════════════════════════════════
 // [KPOS WINV10 P3] — POST /v1/activate
 // Called by main.js ipcMain.handle('license:activate') once on first use.
@@ -159,6 +183,12 @@ app.get('/health', (_req, res) => {
 // ════════════════════════════════════════════════════════════════════
 app.post('/v1/activate', activateLimiter, async (req, res) => {
   const { key, deviceId } = req.body || {};
+
+  // [KPOS WINV10 P6B] — Check server_config: activations_enabled
+  const activationsEnabled = await configFlag('activations_enabled');
+  if (!activationsEnabled) {
+    return res.status(503).json({ success: false, error: 'License activations are temporarily disabled. Contact your seller.' });
+  }
 
   // 1. Input validation
   if (!key || !deviceId) {
