@@ -45,8 +45,14 @@ function randSeg(n) {
 }
 
 /** Generate a valid KPOS license key: KPOS-{T}XXX-XXXX-XXXX-XXXX */
+// [KPOS WINV10 P6B-FIX] Added multi-month prefix support
 function generateKey(type) {
-  const prefix = type === 'yearly' ? 'Y' : type === 'perpetual' ? 'P' : 'M';
+  const prefixMap = {
+    'monthly': 'M', '2month': '2', '3month': '3',
+    '4month': '4', '5month': '5', '6month': '6',
+    'yearly': 'Y', 'perpetual': 'P'
+  };
+  const prefix = prefixMap[type] || 'M';
   const seg1 = prefix + randSeg(3);
   return `KPOS-${seg1}-${randSeg(4)}-${randSeg(4)}-${randSeg(4)}`;
 }
@@ -92,7 +98,7 @@ router.get('/api/licenses', requireAuth, async (req, res) => {
 // POST /admin/api/licenses/create
 router.post('/api/licenses/create', requireAuth, async (req, res) => {
   const { type } = req.body || {};
-  const validTypes = ['monthly', 'yearly', 'perpetual'];
+  const validTypes = ['monthly', '2month', '3month', '4month', '5month', '6month', 'yearly', 'perpetual'];
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid type.' });
 
   const sb  = getSupabase(req);
@@ -638,6 +644,11 @@ textarea{resize:vertical;min-height:80px}
             <label class="fl">License Type</label>
             <select id="gen-type">
               <option value="monthly">Monthly (30 days)</option>
+              <option value="2month">2 Months (60 days)</option>
+              <option value="3month">3 Months (90 days)</option>
+              <option value="4month">4 Months (120 days)</option>
+              <option value="5month">5 Months (150 days)</option>
+              <option value="6month">6 Months (180 days)</option>
               <option value="yearly">Yearly (365 days)</option>
               <option value="perpetual">Perpetual (lifetime)</option>
             </select>
@@ -661,6 +672,11 @@ textarea{resize:vertical;min-height:80px}
         <select id="f-type" onchange="applyFilter()">
           <option value="">All Types</option>
           <option value="monthly">Monthly</option>
+          <option value="2month">2 Months</option>
+          <option value="3month">3 Months</option>
+          <option value="4month">4 Months</option>
+          <option value="5month">5 Months</option>
+          <option value="6month">6 Months</option>
           <option value="yearly">Yearly</option>
           <option value="perpetual">Perpetual</option>
         </select>
@@ -819,11 +835,13 @@ let _revokeKey  = '';
 let _charts     = {};
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
+// [KPOS WINV10 P6B-FIX] Persist token in sessionStorage so page refresh doesn't log out
 function doLogin() {
   const t = document.getElementById('token-input').value.trim();
   if (!t) return;
   ADMIN_TOKEN = t;
   api('GET', '/admin/api/health').then(data => {
+    sessionStorage.setItem('kpos_admin_token', ADMIN_TOKEN);
     document.getElementById('login-screen').style.display = 'none';
     initDashboard();
   }).catch(() => {
@@ -834,9 +852,24 @@ function doLogin() {
 document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
 function logout() {
+  sessionStorage.removeItem('kpos_admin_token');
   ADMIN_TOKEN = '';
   location.reload();
 }
+
+// Auto-login on page load if token is saved in sessionStorage
+(function autoLogin() {
+  const saved = sessionStorage.getItem('kpos_admin_token');
+  if (!saved) return;
+  ADMIN_TOKEN = saved;
+  api('GET', '/admin/api/health').then(() => {
+    document.getElementById('login-screen').style.display = 'none';
+    initDashboard();
+  }).catch(() => {
+    sessionStorage.removeItem('kpos_admin_token');
+    ADMIN_TOKEN = '';
+  });
+})();
 
 // ── API helper ────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
